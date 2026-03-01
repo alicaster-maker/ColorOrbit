@@ -12,7 +12,6 @@ struct ColumnView: View {
     let isSelected: Bool
     let isSolved: Bool
     let ballSize: CGFloat
-    var namespace: Namespace.ID
 
     @State private var shimmerPhase: CGFloat = -0.5
 
@@ -93,8 +92,7 @@ struct ColumnView: View {
                         // Ball if present at this position
                         if position < balls.count {
                             BallView(color: balls[position].color, size: ballSize)
-                                .matchedGeometryEffect(id: balls[position].id, in: namespace)
-                                .transition(.identity)
+                                .transition(.scale.combined(with: .opacity))
                         }
                     }
                     .frame(width: slotSize, height: slotSize)

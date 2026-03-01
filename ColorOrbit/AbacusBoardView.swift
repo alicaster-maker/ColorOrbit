@@ -7,7 +7,6 @@ import SwiftUI
 
 struct AbacusBoardView: View {
     @ObservedObject var gameManager: GameManager
-    @Namespace private var ballNamespace
 
     private var tubeCount: Int { gameManager.tubes.count }
     private var usesTwoRows: Bool { tubeCount > 5 }
@@ -175,8 +174,7 @@ struct AbacusBoardView: View {
                     targetColor: target,
                     isSelected: gameManager.selectedTubeIndex == index,
                     isSolved: isSolved,
-                    ballSize: layout.ballSize,
-                    namespace: ballNamespace
+                    ballSize: layout.ballSize
                 )
                 .frame(width: layout.columnWidth)
                 .onTapGesture {

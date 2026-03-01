@@ -9,6 +9,7 @@ import StoreKit
 struct UndoShopView: View {
     @ObservedObject var gameManager: GameManager
     @ObservedObject var storeManager: StoreManager
+    @ObservedObject var adManager: AdManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var isWatchingAd = false
@@ -40,40 +41,81 @@ struct UndoShopView: View {
                     .padding(.top, 28)
 
                 // Watch Ad Button
-                Button {
-                    isWatchingAd = true
-                    gameManager.watchAdForUndos()
-                } label: {
-                    HStack(spacing: 10) {
-                        if isWatchingAd {
-                            ProgressView()
-                                .tint(.black)
-                        } else {
-                            Image(systemName: "play.fill")
+                VStack(spacing: 6) {
+                    Button {
+                        isWatchingAd = true
+                        Task {
+                            let earned = await adManager.showRewardedAd()
+                            isWatchingAd = false
+                            if earned {
+                                gameManager.grantAdReward()
+                            }
                         }
-                        Text(isWatchingAd ? "Watching..." : "Watch Ad → +3 Free")
-                            .font(.system(.body, design: .rounded, weight: .bold))
-                    }
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.3, green: 0.85, blue: 0.4),
-                                        Color(red: 0.2, green: 0.7, blue: 0.3)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
+                    } label: {
+                        HStack(spacing: 10) {
+                            if isWatchingAd {
+                                ProgressView()
+                                    .tint(.black)
+                            } else {
+                                Image(systemName: "play.fill")
+                            }
+                            Text(isWatchingAd ? "Watching..." : "Watch Ad → +5 Free")
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                        }
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: (gameManager.canWatchAd && adManager.isAdLoaded)
+                                            ? [Color(red: 0.3, green: 0.85, blue: 0.4),
+                                               Color(red: 0.2, green: 0.7, blue: 0.3)]
+                                            : [Color.gray.opacity(0.4), Color.gray.opacity(0.3)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
                                 )
-                            )
-                    )
-                    .shadow(color: .green.opacity(0.3), radius: 8)
+                        )
+                        .shadow(color: (gameManager.canWatchAd && adManager.isAdLoaded) ? .green.opacity(0.3) : .clear, radius: 8)
+                    }
+                    .disabled(isWatchingAd || !gameManager.canWatchAd || !adManager.isAdLoaded)
+
+                    Text("\(gameManager.maxAdsPerLevel - gameManager.adsWatchedThisLevel) remaining")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
-                .disabled(isWatchingAd)
                 .padding(.horizontal, 32)
+
+                // Reset Level Button (when no ads left and no undos)
+                if !gameManager.canWatchAd && gameManager.totalUndos == 0 {
+                    Button {
+                        gameManager.resetCurrentLevel()
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Reset Level")
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.red.opacity(0.8), Color.red.opacity(0.6)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                        )
+                        .shadow(color: .red.opacity(0.3), radius: 8)
+                    }
+                    .padding(.horizontal, 32)
+                }
 
                 // Divider
                 HStack {
@@ -120,6 +162,11 @@ struct UndoShopView: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .onAppear {
+            if !adManager.isAdLoaded && !adManager.isAdShowing {
+                adManager.loadAd()
+            }
+        }
     }
 
     // MARK: - IAP Button (live product)

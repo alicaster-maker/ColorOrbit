@@ -8,6 +8,7 @@ import SwiftUI
 struct GameView: View {
     @ObservedObject var gameManager: GameManager
     @ObservedObject var storeManager: StoreManager
+    @ObservedObject var adManager: AdManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var showRestartAlert = false
@@ -66,7 +67,7 @@ struct GameView: View {
             Text("Your progress on this level will be lost.")
         }
         .sheet(isPresented: $gameManager.showUndoShop) {
-            UndoShopView(gameManager: gameManager, storeManager: storeManager)
+            UndoShopView(gameManager: gameManager, storeManager: storeManager, adManager: adManager)
         }
     }
 
@@ -75,17 +76,17 @@ struct GameView: View {
     private var topBar: some View {
         ZStack {
             // Center — Level info (always perfectly centered)
-            VStack(spacing: 1) {
+            VStack(spacing: 2) {
                 Text("Level \(gameManager.currentLevel)")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(.white)
 
                 if let diff = GameManager.difficultyLabel(for: gameManager.currentLevel) {
                     Text(diff.text)
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
                         .background(
                             Capsule()
                                 .fill(diff.color.opacity(0.35))
@@ -94,70 +95,116 @@ struct GameView: View {
                             Capsule()
                                 .strokeBorder(diff.color.opacity(0.5), lineWidth: 1)
                         )
+                } else {
+                    // Invisible placeholder to keep height consistent
+                    Text(" ")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .padding(.vertical, 2)
+                        .opacity(0)
                 }
             }
 
             // Left — Home + Restart (pinned to leading edge)
             HStack {
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "house.fill")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .frame(width: 32, height: 32)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 40, height: 40)
                     }
 
                     Button {
                         showRestartAlert = true
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .frame(width: 32, height: 32)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 40, height: 40)
                     }
                 }
                 Spacer()
             }
 
-            // Right — Undo (pinned to trailing edge)
+            // Right — Undo + Purchased badge (pinned to trailing edge)
             HStack {
                 Spacer()
-                Button {
-                    if gameManager.totalUndos > 0 {
-                        gameManager.undo()
-                    } else {
+                HStack(spacing: 6) {
+                    // Purchased undos badge
+                    Button {
                         gameManager.showUndoShop = true
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        if gameManager.canUndo && gameManager.totalUndos == 0 {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.orange)
-                        } else {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 10))
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "diamond.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.cyan.opacity(0.8))
+                            Text("\(gameManager.purchasedUndos)")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.cyan)
                         }
-                        Text("\(gameManager.totalUndos)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color.cyan.opacity(0.08))
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.cyan.opacity(0.2), lineWidth: 1)
+                                )
+                        )
                     }
-                    .foregroundStyle(gameManager.canUndo ? .white : .white.opacity(0.4))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(Color.white.opacity(0.1))
-                    )
+
+                    // Undo button (level undos: free + ad)
+                    Button {
+                        if gameManager.totalUndos > 0 {
+                            gameManager.undo()
+                        } else {
+                            gameManager.showUndoShop = true
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if gameManager.totalUndos == 0 && gameManager.canUndo {
+                                Image(systemName: "play.rectangle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.orange)
+                                Text("Ad +5")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.white.opacity(gameManager.canUndo ? 1 : 0.4))
+                                Text("\(gameManager.freeUndos + gameManager.adUndos)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(gameManager.canUndo ? .white : .white.opacity(0.4))
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(gameManager.totalUndos == 0 && gameManager.canUndo
+                                      ? Color.orange.opacity(0.15)
+                                      : Color.white.opacity(0.1))
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(gameManager.totalUndos == 0 && gameManager.canUndo
+                                                      ? Color.orange.opacity(0.4) : Color.clear, lineWidth: 1)
+                                )
+                        )
+                    }
+                    .disabled(!gameManager.canUndo)
                 }
-                .disabled(!gameManager.canUndo)
             }
         }
-        .padding(.vertical, 5)
+        .frame(height: 52)
         .padding(.horizontal, 8)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial.opacity(0.6))
         )
     }
@@ -168,6 +215,7 @@ struct GameView: View {
         HStack {
             Text("Moves: \(gameManager.totalMovesMade)")
                 .font(.system(.caption2, design: .rounded, weight: .medium))
+                .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.5))
 
             Spacer()
@@ -176,6 +224,7 @@ struct GameView: View {
                 .font(.system(.caption2, design: .rounded, weight: .medium))
                 .foregroundStyle(.white.opacity(0.5))
         }
+        .frame(height: 20)
     }
 
     // MARK: - Celebration Overlay

@@ -17,10 +17,15 @@ class GameManager: ObservableObject {
     @Published var tubeTargets: [BallColor?] = []
     @Published var selectedTubeIndex: Int? = nil
     @Published var freeUndos: Int = 3
+    @Published var adUndos: Int = 0
     @Published var purchasedUndos: Int {
         didSet { UserDefaults.standard.set(purchasedUndos, forKey: "co_purchasedUndos") }
     }
-    var totalUndos: Int { freeUndos + purchasedUndos }
+    var totalUndos: Int { freeUndos + adUndos + purchasedUndos }
+
+    @Published var adsWatchedThisLevel: Int = 0
+    let maxAdsPerLevel = 3
+    var canWatchAd: Bool { adsWatchedThisLevel < maxAdsPerLevel }
 
     @Published var canUndo: Bool = false
     @Published var isLevelComplete: Bool = false
@@ -28,12 +33,15 @@ class GameManager: ObservableObject {
     @Published var showCelebration: Bool = false
     @Published var completionMessage: String = ""
     @Published var isAnimating: Bool = false
+    private var animationStartTime: Date = .distantPast
     @Published var highestLevelCompleted: Int {
         didSet { UserDefaults.standard.set(highestLevelCompleted, forKey: "co_highestLevel") }
     }
     @Published var unlockedBuildingName: String? = nil
 
     @Published var tutorialStep: Int = 0  // 0 = no tutorial, 1/2/3 = active steps
+
+    var onLevelCompleted: ((Int, Int) -> Void)?
 
     var moveHistory: [Move] = []
     var totalMovesMade: Int = 0
@@ -73,6 +81,8 @@ class GameManager: ObservableObject {
         completionMessage = ""
         unlockedBuildingName = nil
         freeUndos = 3
+        adUndos = 0
+        adsWatchedThisLevel = 0
 
         // Show tutorial on Level 1, first time only
         let tutorialSeen = UserDefaults.standard.bool(forKey: "co_tutorialSeen")
@@ -119,20 +129,43 @@ class GameManager: ObservableObject {
     // MARK: - Difficulty Label
 
     static func difficultyLabel(for level: Int) -> (text: String, color: Color)? {
-        switch level {
-        case 1...3:     return nil
-        case 4...7:     return ("Easy", .green)
-        case 8...15:    return ("Medium", .yellow)
-        case 16...30:   return ("Hard", .orange)
-        case 31...60:   return ("Very Hard", .red)
-        case 61...100:  return ("Extreme", Color(red: 1.0, green: 0.2, blue: 0.6))
-        default:        return ("Legendary", Color(red: 0.7, green: 0.3, blue: 1.0))
+        guard level > 3 else { return nil }
+
+        // Compute base difficulty from actual level parameters
+        let colors = LevelGenerator.colorCount(for: level)
+        let empties = LevelGenerator.emptyTubeCount(for: level)
+        let capacity = LevelGenerator.tubeCapacity(for: level)
+        let range = LevelGenerator.targetRange(for: level)
+
+        var base: Double = 0
+        base += Double(colors - 3) * 8.0          // 0-40 from color count
+        base += Double(range.lowerBound) * 0.5     // ~1.5-17 from move complexity
+        base += (empties == 1) ? 6.0 : 0.0         // fewer empties = harder
+        base += (capacity == 5) ? 3.0 : 0.0        // larger capacity = slightly harder
+
+        // Seeded random variation per level for unpredictability
+        var rng = SeededRandomNumberGenerator(seed: UInt64(level) &* 2654435761 &+ 13)
+        let variation = Double.random(in: -20...20, using: &rng)
+
+        let score = max(0, min(100, base + variation))
+
+        switch score {
+        case ..<15:  return ("Easy", .green)
+        case ..<30:  return ("Medium", .yellow)
+        case ..<45:  return ("Hard", .orange)
+        case ..<60:  return ("Very Hard", .red)
+        case ..<78:  return ("Extreme", Color(red: 1.0, green: 0.2, blue: 0.6))
+        default:     return ("Legendary", Color(red: 0.7, green: 0.3, blue: 1.0))
         }
     }
 
     // MARK: - Tap / Move Logic
 
     func tapTube(at index: Int) {
+        // Auto-recover if isAnimating got stuck (> 0.6s)
+        if isAnimating && Date().timeIntervalSince(animationStartTime) > 0.4 {
+            isAnimating = false
+        }
         guard !isAnimating, !isLevelComplete else { return }
 
         if let selected = selectedTubeIndex {
@@ -204,6 +237,7 @@ class GameManager: ObservableObject {
         let moveCount = min(consecutiveCount, availableSpace)
 
         isAnimating = true
+        animationStartTime = Date()
         let ballsToMove = Array(tubes[sourceIndex].suffix(moveCount))
         let move = Move(fromTube: sourceIndex, toTube: destIndex, balls: ballsToMove)
 
@@ -217,7 +251,7 @@ class GameManager: ObservableObject {
         canUndo = true
         totalMovesMade += 1
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.isAnimating = false
             self?.checkLevelComplete()
         }
@@ -226,26 +260,34 @@ class GameManager: ObservableObject {
     // MARK: - Undo
 
     func undo() {
+        // Auto-recover if isAnimating got stuck
+        if isAnimating && Date().timeIntervalSince(animationStartTime) > 0.4 {
+            isAnimating = false
+        }
         guard totalUndos > 0, let lastMove = moveHistory.popLast(), !isAnimating else { return }
 
         isAnimating = true
+        animationStartTime = Date()
 
-        // Consume free undos first, then purchased
+        // Consume free undos first, then ad undos, then purchased
         if freeUndos > 0 {
             freeUndos -= 1
+        } else if adUndos > 0 {
+            adUndos -= 1
         } else {
             purchasedUndos -= 1
         }
 
         undosUsed += 1
         canUndo = !moveHistory.isEmpty
+        selectedTubeIndex = nil
 
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             tubes[lastMove.toTube].removeLast(lastMove.balls.count)
             tubes[lastMove.fromTube].append(contentsOf: lastMove.balls)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.isAnimating = false
         }
     }
@@ -254,12 +296,15 @@ class GameManager: ObservableObject {
         purchasedUndos += count
     }
 
-    func watchAdForUndos() {
-        // Placeholder: simulates a rewarded ad with 2s delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.addUndos(3)
-            self?.showUndoShop = false
-        }
+    func grantAdReward() {
+        guard canWatchAd else { return }
+        adUndos += 5
+        adsWatchedThisLevel += 1
+        showUndoShop = false
+    }
+
+    func resetCurrentLevel() {
+        loadLevel()
     }
 
     // MARK: - Win Check
@@ -287,6 +332,10 @@ class GameManager: ObservableObject {
         highestLevelCompleted = max(highestLevelCompleted, currentLevel)
         unlockedBuildingName = marsNewBuildingName(for: currentLevel)
         completionMessage = computeCompletionMessage()
+
+        // Notify Firebase sync
+        onLevelCompleted?(currentLevel + 1, highestLevelCompleted)
+
         withAnimation(.spring(response: 0.5)) {
             isLevelComplete = true
         }
